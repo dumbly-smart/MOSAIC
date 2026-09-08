@@ -116,6 +116,7 @@ class BgeM3:
         self._embedder = make_embedder(os.environ.get("MOSAIC_EMBEDDING_PROVIDER", "ollama"))
         self.name = self._embedder.name
         self.provider = self._embedder.provider
+        self.dimension = self._embedder.dimension
 
     def encode(self, texts):
         return self._embedder.encode_documents(texts)
@@ -152,6 +153,7 @@ class PgStore:
             PRIMARY KEY (corpus_id, model, chunk_id))""")
         self.conn.execute("""CREATE INDEX IF NOT EXISTS mosaic_benchmark_chunks_embedding_hnsw
             ON mosaic_benchmark_chunks USING hnsw (embedding vector_cosine_ops)""")
+        self.conn.execute("ALTER TABLE mosaic_benchmark_chunks ENABLE ROW LEVEL SECURITY")
         self.conn.commit()
 
     def index(self, corpus_id, model, records, vectors):

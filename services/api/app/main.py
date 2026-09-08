@@ -1,11 +1,22 @@
 """MOSAIC FastAPI application."""
 
+import logging
 from hashlib import sha256
 from pathlib import Path
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -21,10 +32,14 @@ from .schemas import (
     LoginRequest,
     TokenResponse,
     UserResponse,
+    VerificationRunCreate,
+    VerificationRunResponse,
 )
 from .storage import StorageError, SupabaseStorage
+from .verification_runner import LocalVerificationRunner
 
 bearer = HTTPBearer(auto_error=False)
+logger = logging.getLogger(__name__)
 
 
 def _build_services(settings: Settings):
@@ -42,7 +57,9 @@ def _build_services(settings: Settings):
     return database, storage, verifier
 
 
-def create_app(*, settings=None, database=None, storage=None, verifier=None) -> FastAPI:
+def create_app(
+    *, settings=None, database=None, storage=None, verifier=None, runner=None
+) -> FastAPI:
     settings = settings or get_settings()
     defaults = _build_services(settings)
     app = FastAPI(
@@ -61,11 +78,21 @@ def create_app(*, settings=None, database=None, storage=None, verifier=None) -> 
     app.state.database = database or defaults[0]
     app.state.storage = storage or defaults[1]
     app.state.verifier = verifier or defaults[2]
+    app.state.runner = runner or (
+        LocalVerificationRunner(app.state.storage, settings.database_url)
+        if app.state.storage and settings.database_url
+        else None
+    )
 
     @app.get("/health", response_model=HealthResponse, tags=["system"])
     def health(request: Request):
         configured = all(
-            (request.app.state.database, request.app.state.storage, request.app.state.verifier)
+            (
+                request.app.state.database,
+                request.app.state.storage,
+                request.app.state.verifier,
+                request.app.state.runner,
+            )
         )
         return {"status": "ok", "configured": configured}
 
@@ -176,6 +203,59 @@ def create_app(*, settings=None, database=None, storage=None, verifier=None) -> 
             raise HTTPException(status_code=404, detail="Case not found")
         return database_service.list_documents(case_id, user.id)
 
+    @app.post(
+        "/v1/cases/{case_id}/verification-runs",
+        response_model=VerificationRunResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["verification"],
+    )
+    def start_verification(
+        case_id: UUID,
+        body: VerificationRunCreate,
+        background_tasks: BackgroundTasks,
+        request: Request,
+        user: Annotated[AuthenticatedUser, Depends(current_user)],
+    ):
+        database_service = require_service(request, "database")
+        runner_service = require_service(request, "runner")
+        documents = database_service.get_documents_for_run(case_id, user.id)
+        if len([item for item in documents if item["kind"] == "tender"]) != 1 or not any(
+            item["kind"] == "bidder" for item in documents
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Upload exactly one tender PDF and at least one bidder PDF first",
+            )
+        run = database_service.create_verification_run(case_id, user.id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Case not found")
+        background_tasks.add_task(
+            execute_verification,
+            database_service,
+            runner_service,
+            run["id"],
+            documents,
+            body.force_ocr_bidder,
+            body.top_k,
+        )
+        return run
+
+    @app.get(
+        "/v1/verification-runs/{run_id}",
+        response_model=VerificationRunResponse,
+        tags=["verification"],
+    )
+    def get_verification(
+        run_id: UUID,
+        request: Request,
+        user: Annotated[AuthenticatedUser, Depends(current_user)],
+    ):
+        database_service = require_service(request, "database")
+        run = database_service.get_verification_run(run_id, user.id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Verification run not found")
+        return run
+
     return app
 
 
@@ -197,6 +277,20 @@ def current_user(
         return verifier.verify(credentials.credentials)
     except AuthenticationError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+def execute_verification(database, runner, run_id, documents, force_ocr_bidder, top_k):
+    database.mark_verification_running(run_id)
+    try:
+        criteria_document, report = runner.run(
+            documents, force_ocr_bidder=force_ocr_bidder, top_k=top_k
+        )
+        database.complete_verification_run(run_id, criteria_document["criteria"], report)
+    except Exception as exc:
+        logger.exception("Verification run %s failed", run_id)
+        database.fail_verification_run(
+            run_id, f"{type(exc).__name__}: verification failed; inspect server logs"
+        )
 
 
 app = create_app()

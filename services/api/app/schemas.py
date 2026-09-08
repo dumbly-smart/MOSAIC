@@ -70,3 +70,29 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str
     expires_in: int
+
+
+class VerificationRunCreate(BaseModel):
+    force_ocr_bidder: bool = False
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+class VerificationRunStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    NEEDS_MANUAL_REVIEW = "needs_manual_review"
+
+
+class VerificationRunResponse(BaseModel):
+    id: UUID
+    case_id: UUID
+    status: VerificationRunStatus
+    policy_version: str
+    score: int | None
+    result: dict | None
+    error_message: str | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None

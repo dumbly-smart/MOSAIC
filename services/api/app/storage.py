@@ -43,3 +43,16 @@ class SupabaseStorage:
         )
         if response.status_code not in (200, 204):
             raise StorageError(f"Supabase Storage cleanup failed ({response.status_code})")
+
+    def download(self, object_path: str) -> bytes:
+        encoded_path = quote(object_path, safe="/")
+        response = self.http_client.get(
+            f"{self.base_url}/storage/v1/object/authenticated/{quote(self.bucket)}/{encoded_path}",
+            headers={
+                "apikey": self.secret_key,
+                "Authorization": f"Bearer {self.secret_key}",
+            },
+        )
+        if response.status_code != 200:
+            raise StorageError(f"Supabase Storage download failed ({response.status_code})")
+        return response.content

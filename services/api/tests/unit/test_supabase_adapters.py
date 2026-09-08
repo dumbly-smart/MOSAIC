@@ -11,6 +11,7 @@ class FakeResponse:
     def __init__(self, status_code=200, body=None):
         self.status_code = status_code
         self.body = body or {}
+        self.content = b"downloaded-file"
 
     def json(self):
         return self.body
@@ -84,6 +85,8 @@ class SupabaseAdapterTests(unittest.TestCase):
         self.assertEqual(options["headers"]["Authorization"], "Bearer server-secret")
         storage.remove(["user/case/a file.pdf"])
         self.assertEqual(client.calls[-1][2]["json"], {"prefixes": ["user/case/a file.pdf"]})
+        self.assertEqual(storage.download("user/case/a file.pdf"), b"downloaded-file")
+        self.assertIn("/object/authenticated/mosaic-documents/", client.calls[-1][1])
 
         client.response = FakeResponse(status_code=500)
         with self.assertRaises(StorageError):
@@ -94,6 +97,7 @@ class SupabaseAdapterTests(unittest.TestCase):
         sql = (repository / "supabase/migrations/202609080001_initial_backend.sql").read_text()
         for contract in (
             "extensions.vector(1024)",
+            "mosaic_benchmark_chunks",
             "using hnsw",
             "enable row level security",
             "audit_events is append-only",

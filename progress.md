@@ -17,10 +17,11 @@ MOSAIC now has a local, framework-independent Python verification core and a tes
 external-PDF workflow. It extracts grounded typed criteria from a tender PDF, processes native
 or fully scanned bidder PDFs, retrieves evidence with BGE-M3 through a local index or pgvector,
 compares it with Qwen3-VL, and scores it deterministically. FastAPI now provides Supabase login,
-authenticated cases, private PDF upload and document listing. The Supabase migration defines
-PostgreSQL/RLS, private Storage, pgvector, verification records and append-only auditing; live
-hosted integration awaits project configuration. Portal adapters, background job execution and
-the web application have not yet been connected.
+authenticated cases, private PDF upload/listing and background verification runs. Each run uses
+Docling/RapidOCR, Supabase pgvector, BGE-M3, local Qwen3-VL and deterministic scoring, then stores
+its criteria, findings and report. The Supabase migration defines PostgreSQL/RLS, private Storage,
+pgvector and append-only auditing; live hosted integration awaits project configuration. Portal
+adapters and the web application have not yet been connected.
 
 ## Documentation baseline
 
@@ -155,7 +156,7 @@ Do not mark an implementation item complete without running its relevant command
 | 2026-09-08 | Verification branch pre-push checks | `python -m unittest discover -s services/api/tests -q`, Ruff lint/format checks, PowerShell parser, and `git diff --check` | Passed: 85 tests; lint, format, script syntax, and whitespace checks passed |
 | 2026-09-08 | Typed rules and pgvector integration | Typed grounding/scoring tests, pgvector SQL contract tests, synthetic PDF structure/render checks, full unit suite, Ruff | Passed: numeric, boolean, document-presence, categorical and date evaluation; pgvector schema/upsert/scoped-cosine contract; 96 tests; lint and format passed |
 | 2026-09-08 | Live mixed-type PDF workflow | Docling tender extraction, RapidOCR on all five image-only bidder pages, BGE-M3 retrieval, Qwen3-VL comparison, and deterministic weighted scoring | Passed: boolean, document-presence, categorical, ISO-date, and numeric criteria; exact grounded page evidence; 100/100; advisory `qualify` |
-| 2026-09-08 | Supabase/FastAPI foundation | FastAPI unit/integration-style tests, adapter/security contract tests, full regression suite, Ruff, PowerShell parser, and live Uvicorn Swagger probe | Passed: 106 tests; `/health`, `/docs`, and `/openapi.json` returned successfully; hosted Supabase integration awaits project configuration |
+| 2026-09-08 | Supabase/FastAPI workflow | FastAPI workflow tests, adapter/security/runner contract tests, full regression suite, Ruff, PowerShell parser, and live Uvicorn Swagger/OpenAPI probe | Passed: 110 tests; eight API paths include upload, start-run and get-run; background workflow uses Supabase pgvector and persists results; hosted Supabase integration awaits project configuration |
 
 ## Decisions
 

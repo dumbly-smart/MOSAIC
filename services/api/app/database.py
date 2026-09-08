@@ -1,12 +1,12 @@
 """PostgreSQL repository for cases and uploaded documents."""
 
 from contextlib import contextmanager
-from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 
 class Database:
@@ -75,6 +75,117 @@ class Database:
             )
             return list(cursor.fetchall())
 
+    def get_documents_for_run(self, case_id: UUID, owner_id: str) -> list[dict[str, Any]]:
+        with self.connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT d.id, d.kind, d.bucket, d.object_path, d.original_filename
+                FROM public.documents d
+                JOIN public.cases c ON c.id = d.case_id
+                WHERE d.case_id = %s AND c.created_by = %s
+                ORDER BY d.created_at, d.id
+                """,
+                (case_id, UUID(owner_id)),
+            )
+            return list(cursor.fetchall())
 
-def utc_now() -> datetime:
-    return datetime.now().astimezone()
+    def create_verification_run(self, case_id: UUID, owner_id: str) -> dict[str, Any] | None:
+        run_id = uuid4()
+        with self.connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO public.verification_runs
+                    (id, case_id, created_by, status, policy_version)
+                SELECT %s, id, created_by, 'queued', %s
+                FROM public.cases WHERE id = %s AND created_by = %s
+                RETURNING id, case_id, status, policy_version, score, result, error_message,
+                          created_at, started_at, completed_at
+                """,
+                (run_id, "tender-evidence-quota-v2", case_id, UUID(owner_id)),
+            )
+            return cursor.fetchone()
+
+    def get_verification_run(self, run_id: UUID, owner_id: str) -> dict[str, Any] | None:
+        with self.connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, case_id, status, policy_version, score, result, error_message,
+                       created_at, started_at, completed_at
+                FROM public.verification_runs WHERE id = %s AND created_by = %s
+                """,
+                (run_id, UUID(owner_id)),
+            )
+            return cursor.fetchone()
+
+    def mark_verification_running(self, run_id: UUID) -> None:
+        with self.connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE public.verification_runs SET status = 'running', started_at = now()
+                WHERE id = %s AND status = 'queued'
+                """,
+                (run_id,),
+            )
+
+    def complete_verification_run(
+        self, run_id: UUID, criteria: list[dict[str, Any]], report: dict[str, Any]
+    ) -> None:
+        with self.connection() as connection, connection.cursor() as cursor:
+            for criterion in criteria:
+                cursor.execute(
+                    """
+                    INSERT INTO public.criteria
+                        (id, verification_run_id, criterion_id, rule_version, definition)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (
+                        uuid4(),
+                        run_id,
+                        criterion["id"],
+                        criterion.get("rule_version", "unknown"),
+                        Jsonb(criterion),
+                    ),
+                )
+            for finding in report["results"]:
+                cursor.execute(
+                    """
+                    INSERT INTO public.findings
+                        (id, verification_run_id, criterion_id, status, severity, earned_points,
+                         explanation, evidence)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        uuid4(),
+                        run_id,
+                        finding["criterion_id"],
+                        finding["status"],
+                        finding.get("severity", "medium"),
+                        finding["earned_points"],
+                        finding["reason"],
+                        Jsonb(finding.get("evidence") or {}),
+                    ),
+                )
+            cursor.execute(
+                """
+                UPDATE public.verification_runs
+                SET status = %s, score = %s, result = %s, completed_at = now()
+                WHERE id = %s
+                """,
+                (
+                    "needs_manual_review" if report["review_required"] else "completed",
+                    report["score"],
+                    Jsonb(report),
+                    run_id,
+                ),
+            )
+
+    def fail_verification_run(self, run_id: UUID, message: str) -> None:
+        with self.connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE public.verification_runs
+                SET status = 'failed', error_message = %s, completed_at = now()
+                WHERE id = %s
+                """,
+                (message[:1000], run_id),
+            )

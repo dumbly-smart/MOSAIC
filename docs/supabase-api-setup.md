@@ -42,8 +42,15 @@ Open `http://127.0.0.1:8000/docs`.
 6. Call `POST /v1/cases/{case_id}/documents` twice: once with `kind=tender` and once with
    `kind=bidder`. Select a PDF for each request.
 7. Call `GET /v1/cases/{case_id}/documents` and confirm both stored documents are listed.
+8. Call `POST /v1/cases/{case_id}/verification-runs`. Enable `force_ocr_bidder` when the bidder
+   PDFs are scanned images.
+9. Copy the run ID and poll `GET /v1/verification-runs/{run_id}`. The status moves through
+   `queued`, `running`, and then `completed`, `needs_manual_review`, or `failed`. A successful
+   response includes the complete grounded report in `result`.
 
 Uploads are limited to 50 MiB by default. The API checks the media type, size, and PDF header,
 stores the original in the private bucket, records its SHA-256 digest, and removes the object if
-the metadata transaction fails. Full PDF parsing and verification job execution will be connected
-to these records in the next backend slice.
+the metadata transaction fails. The verification background task downloads the private files,
+merges multiple bidder PDFs, runs Docling/RapidOCR, stores and searches BGE-M3 embeddings in
+Supabase pgvector, compares the evidence with local Qwen3-VL, and persists the criteria, findings,
+score and report in PostgreSQL. Keep the API process and Ollama running until the job completes.

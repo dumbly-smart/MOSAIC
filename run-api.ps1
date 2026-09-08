@@ -1,6 +1,6 @@
 param(
     [int]$Port = 8000,
-    [switch]$NoReload
+    [switch]$Reload
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,7 +16,7 @@ $Arguments = @(
     "--host", "127.0.0.1",
     "--port", $Port.ToString()
 )
-if (-not $NoReload) {
+if ($Reload) {
     $Arguments += "--reload"
 }
 

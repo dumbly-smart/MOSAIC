@@ -32,6 +32,7 @@ class FakeDatabase:
     def __init__(self):
         self.cases = {}
         self.documents = []
+        self.runs = {}
 
     def create_case(self, owner_id, title, description):
         now = datetime.now(UTC)
@@ -73,6 +74,52 @@ class FakeDatabase:
             return []
         return [item for item in self.documents if item["case_id"] == case_id]
 
+    def get_documents_for_run(self, case_id, owner_id):
+        if self.get_case(case_id, owner_id) is None:
+            return []
+        return [item for item in self.documents if item["case_id"] == case_id]
+
+    def create_verification_run(self, case_id, owner_id):
+        if self.get_case(case_id, owner_id) is None:
+            return None
+        now = datetime.now(UTC)
+        run = {
+            "id": uuid4(),
+            "case_id": UUID(str(case_id)),
+            "status": "queued",
+            "policy_version": "tender-evidence-quota-v2",
+            "score": None,
+            "result": None,
+            "error_message": None,
+            "created_at": now,
+            "started_at": None,
+            "completed_at": None,
+        }
+        self.runs[run["id"]] = run
+        return dict(run)
+
+    def get_verification_run(self, run_id, owner_id):
+        run = self.runs.get(run_id)
+        if run and self.get_case(run["case_id"], owner_id):
+            return run
+        return None
+
+    def mark_verification_running(self, run_id):
+        self.runs[run_id].update(status="running", started_at=datetime.now(UTC))
+
+    def complete_verification_run(self, run_id, criteria, report):
+        self.runs[run_id].update(
+            status="completed",
+            score=report["score"],
+            result=report,
+            completed_at=datetime.now(UTC),
+        )
+
+    def fail_verification_run(self, run_id, message):
+        self.runs[run_id].update(
+            status="failed", error_message=message, completed_at=datetime.now(UTC)
+        )
+
 
 class FakeStorage:
     def __init__(self):
@@ -86,6 +133,16 @@ class FakeStorage:
         self.removed.extend(paths)
 
 
+class FakeRunner:
+    def run(self, documents, *, force_ocr_bidder=False, top_k=5):
+        return {"criteria": [{"id": "C1"}]}, {
+            "score": 100,
+            "results": [],
+            "review_required": False,
+            "recommendation": "qualify",
+        }
+
+
 class ApiTests(unittest.TestCase):
     def setUp(self):
         self.database = FakeDatabase()
@@ -97,6 +154,7 @@ class ApiTests(unittest.TestCase):
                 database=self.database,
                 storage=self.storage,
                 verifier=FakeVerifier(),
+                runner=FakeRunner(),
             )
         )
         self.headers = {"Authorization": "Bearer valid-token"}
@@ -171,6 +229,31 @@ class ApiTests(unittest.TestCase):
     def test_unknown_case_is_not_exposed(self):
         response = self.client.get(f"/v1/cases/{uuid4()}", headers=self.headers)
         self.assertEqual(response.status_code, 404)
+
+    def test_verification_run_requires_documents_then_returns_report(self):
+        case_id = self.create_case()
+        missing = self.client.post(
+            f"/v1/cases/{case_id}/verification-runs", json={}, headers=self.headers
+        )
+        self.assertEqual(missing.status_code, 409)
+        for kind in ("tender", "bidder"):
+            uploaded = self.client.post(
+                f"/v1/cases/{case_id}/documents",
+                headers=self.headers,
+                data={"kind": kind},
+                files={"file": (f"{kind}.pdf", b"%PDF-1.7\nfixture", "application/pdf")},
+            )
+            self.assertEqual(uploaded.status_code, 201)
+        started = self.client.post(
+            f"/v1/cases/{case_id}/verification-runs",
+            json={"force_ocr_bidder": True, "top_k": 5},
+            headers=self.headers,
+        )
+        self.assertEqual(started.status_code, 202, started.text)
+        run_id = started.json()["id"]
+        result = self.client.get(f"/v1/verification-runs/{run_id}", headers=self.headers)
+        self.assertEqual(result.json()["status"], "completed")
+        self.assertEqual(result.json()["score"], 100)
 
 
 if __name__ == "__main__":

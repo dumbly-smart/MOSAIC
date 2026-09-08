@@ -67,22 +67,17 @@ create table if not exists public.findings (
     created_at timestamptz not null default now()
 );
 
-create table if not exists public.document_chunks (
-    id text primary key,
-    document_id uuid not null references public.documents(id) on delete cascade,
-    corpus_hash text not null,
-    embedding_model text not null,
-    page_number integer not null check (page_number > 0),
-    line_number integer check (line_number is null or line_number > 0),
-    content text not null,
-    metadata jsonb not null default '{}'::jsonb,
+create table if not exists public.mosaic_benchmark_chunks (
+    corpus_id text not null,
+    model text not null,
+    chunk_id text not null,
+    payload jsonb not null,
     embedding extensions.vector(1024) not null,
-    created_at timestamptz not null default now(),
-    unique (corpus_hash, embedding_model, id)
+    primary key (corpus_id, model, chunk_id)
 );
 
-create index if not exists document_chunks_embedding_hnsw
-    on public.document_chunks using hnsw (embedding extensions.vector_cosine_ops);
+create index if not exists mosaic_benchmark_chunks_embedding_hnsw
+    on public.mosaic_benchmark_chunks using hnsw (embedding extensions.vector_cosine_ops);
 create index if not exists documents_case_id_idx on public.documents(case_id);
 create index if not exists verification_runs_case_id_idx on public.verification_runs(case_id);
 create index if not exists findings_run_id_idx on public.findings(verification_run_id);
@@ -112,7 +107,7 @@ alter table public.documents enable row level security;
 alter table public.verification_runs enable row level security;
 alter table public.criteria enable row level security;
 alter table public.findings enable row level security;
-alter table public.document_chunks enable row level security;
+alter table public.mosaic_benchmark_chunks enable row level security;
 alter table public.audit_events enable row level security;
 
 drop policy if exists "officers manage own cases" on public.cases;
@@ -147,12 +142,6 @@ create policy "officers read own findings" on public.findings
 for select to authenticated using (exists (
     select 1 from public.verification_runs r
     where r.id = verification_run_id and r.created_by = auth.uid()
-));
-
-drop policy if exists "officers read own chunks" on public.document_chunks;
-create policy "officers read own chunks" on public.document_chunks
-for select to authenticated using (exists (
-    select 1 from public.documents d where d.id = document_id and d.created_by = auth.uid()
 ));
 
 drop policy if exists "officers read own audit" on public.audit_events;

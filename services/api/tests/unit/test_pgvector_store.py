@@ -66,6 +66,7 @@ class PgVectorStoreTests(unittest.TestCase):
         self.assertIn("CREATE EXTENSION IF NOT EXISTS vector", sql)
         self.assertIn("embedding vector(1024)", sql)
         self.assertIn("USING hnsw (embedding vector_cosine_ops)", sql)
+        self.assertIn("ENABLE ROW LEVEL SECURITY", sql)
 
     def test_index_is_idempotent_and_scoped(self):
         self.store.index("corpus-a", "bge-m3:latest", [self.chunk], [self.vector])
