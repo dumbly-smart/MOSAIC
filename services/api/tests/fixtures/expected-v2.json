@@ -1,0 +1,62 @@
+{
+  "note": "Evaluation-only answer key. Never pass to retrieval or Qwen.",
+  "page_count": 500,
+  "text_lines_per_page": 24,
+  "expected_score": 35,
+  "criteria": [
+    {
+      "criterion_id": "C1",
+      "quote": "Current bid security: 15000 INR.",
+      "value": 15000,
+      "page": 11,
+      "line": 256,
+      "status": "failed",
+      "earned_points": 0
+    },
+    {
+      "criterion_id": "C2",
+      "quote": "Current annual turnover: 970000 INR.",
+      "value": 970000,
+      "page": 107,
+      "line": 2560,
+      "status": "failed",
+      "earned_points": 0
+    },
+    {
+      "criterion_id": "C3",
+      "quote": "Relevant completed experience: 7 years.",
+      "value": 7,
+      "page": 231,
+      "line": 5536,
+      "status": "passed",
+      "earned_points": 20
+    },
+    {
+      "criterion_id": "C4",
+      "quote": "Currently assigned engineers: 12 people (provisional; roster unconfirmed).",
+      "value": 12,
+      "page": 389,
+      "line": 9328,
+      "status": "manual_review",
+      "earned_points": 0
+    },
+    {
+      "criterion_id": "C5",
+      "quote": "Committed support response: 12 hours.",
+      "value": 12,
+      "page": 497,
+      "line": 11920,
+      "status": "passed",
+      "earned_points": 15
+    }
+  ],
+  "scanned_pages": [
+    107,
+    150,
+    300,
+    389,
+    450
+  ],
+  "scoring_policy": "tender-evidence-quota-v2",
+  "criteria_version": "synthetic-tender-v3"
+}

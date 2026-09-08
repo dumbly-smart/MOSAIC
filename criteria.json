@@ -1,0 +1,87 @@
+{
+  "version": "synthetic-tender-v3",
+  "description": "Invented hackathon requirements, not official procurement criteria.",
+  "criteria": [
+    {
+      "id": "C1",
+      "clause": "Current bid security must be at least INR 25000",
+      "field": "Current bid security",
+      "operator": ">=",
+      "threshold": 25000,
+      "unit": "INR",
+      "weight": 25,
+      "tender_id": "SYNTHETIC-MOSAIC-001",
+      "rule_version": "synthetic-tender-v3",
+      "source": {
+        "clause": "Current bid security must be at least INR 25000",
+        "reference": "synthetic:criteria.json#C1",
+        "synthetic": true
+      }
+    },
+    {
+      "id": "C2",
+      "clause": "Current annual turnover must be at least INR 1000000",
+      "field": "Current annual turnover",
+      "operator": ">=",
+      "threshold": 1000000,
+      "unit": "INR",
+      "weight": 25,
+      "tender_id": "SYNTHETIC-MOSAIC-001",
+      "rule_version": "synthetic-tender-v3",
+      "source": {
+        "clause": "Current annual turnover must be at least INR 1000000",
+        "reference": "synthetic:criteria.json#C2",
+        "synthetic": true
+      }
+    },
+    {
+      "id": "C3",
+      "clause": "Relevant completed experience must be at least 5 years",
+      "field": "Relevant completed experience",
+      "operator": ">=",
+      "threshold": 5,
+      "unit": "years",
+      "weight": 20,
+      "tender_id": "SYNTHETIC-MOSAIC-001",
+      "rule_version": "synthetic-tender-v3",
+      "source": {
+        "clause": "Relevant completed experience must be at least 5 years",
+        "reference": "synthetic:criteria.json#C3",
+        "synthetic": true
+      }
+    },
+    {
+      "id": "C4",
+      "clause": "Currently assigned engineers must be at least 10 people",
+      "field": "Currently assigned engineers",
+      "operator": ">=",
+      "threshold": 10,
+      "unit": "people",
+      "weight": 15,
+      "tender_id": "SYNTHETIC-MOSAIC-001",
+      "rule_version": "synthetic-tender-v3",
+      "source": {
+        "clause": "Currently assigned engineers must be at least 10 people",
+        "reference": "synthetic:criteria.json#C4",
+        "synthetic": true
+      }
+    },
+    {
+      "id": "C5",
+      "clause": "Committed support response must be at most 24 hours",
+      "field": "Committed support response",
+      "operator": "<=",
+      "threshold": 24,
+      "unit": "hours",
+      "weight": 15,
+      "tender_id": "SYNTHETIC-MOSAIC-001",
+      "rule_version": "synthetic-tender-v3",
+      "source": {
+        "clause": "Committed support response must be at most 24 hours",
+        "reference": "synthetic:criteria.json#C5",
+        "synthetic": true
+      }
+    }
+  ],
+  "scoring_policy": "tender-evidence-quota-v2"
+}

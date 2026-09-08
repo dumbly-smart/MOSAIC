@@ -215,14 +215,19 @@ Confidence below the configured threshold produces `needs_manual_review`. The so
 
 ## 11. Tender requirement indexing
 
-Each published tender is converted into versioned, searchable requirements:
+Each tender document is converted into grounded, versioned requirements before bidder
+scoring begins:
 
-1. Parse tender documents into sections and clauses.
-2. Split them into meaningful chunks without losing clause boundaries.
-3. Assign stable requirement identifiers.
-4. Generate embeddings using the configured embedding model.
-5. Store the embeddings using pgvector.
-6. Link every record to its tender and rule-set version.
+1. Parse every tender page using native extraction with OCR fallback and retain page provenance.
+2. Ask Qwen3-VL for structured candidate criteria using the page text and page image.
+3. Accept a candidate only when its clause, numeric bounds, unit, weight, and source page are
+   grounded in exact tender quotes.
+4. Require a declared criterion count and weights totalling 100; missing or contradictory
+   declarations stop automatic scoring and require clarification.
+5. Derive the tender and rule-set versions from the source PDF hash, model identity, and prompt
+   version, then publish the validated rule set as immutable.
+6. Split requirements and bidder evidence into page-bounded chunks, generate BGE-M3 embeddings,
+   and store the production vectors using pgvector.
 
 ```text
 TenderRequirement
@@ -242,15 +247,18 @@ TenderRequirement
 ```
 
 Published requirements are immutable. Updating a tender creates a new version instead of silently replacing previous requirements.
+Qwen3-VL proposes structured rules but does not authorize or score them. Unsupported,
+ungrounded, or incomplete rules are rejected or routed to officer clarification rather than
+being filled with invented weights, tolerance bands, or fallback ranges.
 
 ## 12. Vector retrieval with pgvector
 
-For each bidder evidence unit, the retrieval service:
+For each validated tender criterion, the retrieval service:
 
-1. Creates a query using the evidence and document context.
+1. Creates a query from the criterion field, operator, threshold, unit, and source clause.
 2. Generates an embedding.
-3. Searches pgvector for similar tender requirements.
-4. Filters candidates by the selected tender and rule-set version.
+3. Searches pgvector for similar bidder-evidence chunks.
+4. Filters candidates by the case, bidder document, tender, and rule-set version.
 5. Retrieves multiple candidates rather than accepting the top result automatically.
 6. Applies similarity and relevance thresholds.
 7. Passes valid candidates to the comparison stage.
@@ -458,25 +466,32 @@ Audited actions include case creation, upload, processing, extraction, retrieval
 ## 21. End-to-end workflow
 
 1. An authenticated officer creates a case.
-2. The officer selects a published tender and rule-set version.
-3. The officer uploads a synthetic bidder document package.
-4. The API validates, checksums, and stores each file, records metadata, appends an audit event, and queues processing.
-5. The worker scans and classifies each document.
-6. Native parsers, OCR, or Qwen3-VL extract fields with page and region provenance.
-7. The system normalizes identifiers, names, dates, amounts, and certificate references.
-8. The system creates embeddings for relevant bidder evidence.
-9. pgvector retrieves multiple candidate requirements from the selected tender version.
-10. Thresholds remove unreliable candidates; absent reliable matches go to manual review.
-11. Qwen3-VL compares original evidence against retrieved requirements.
-12. The comparison service validates the structured response, evidence references, and confidence.
-13. When required, normalized identifiers are sent to labelled mock or sandbox portal adapters.
-14. Adapter responses are converted into `EvidenceResult` records.
-15. The deterministic rule engine evaluates document evidence, retrieval results, model comparisons, and portal evidence.
-16. The scoring service calculates score and risk.
-17. The recommendation service produces an evidence-linked recommendation.
-18. The dashboard presents evidence, matched clauses, comparisons, portal results, findings, score, risk, and recommendation.
-19. The officer reviews the evidence and records a final decision with a reason.
-20. The API stores the immutable decision and appends an audit event.
+2. The officer uploads or selects a tender PDF and uploads the bidder document package.
+3. The API validates, checksums, and stores each file, records metadata, appends an audit event, and queues processing.
+4. The worker scans and classifies the tender and bidder documents.
+5. Native parsing with OCR fallback extracts every tender page with page provenance.
+6. Qwen3-VL proposes tender criteria; grounding validation accepts only exact source clauses,
+   numeric limits, units, weights, and pages.
+7. The system validates the declared criterion count and total weight, then freezes the
+   source-hash-derived tender rule-set version. Any unresolved rule awaits officer clarification.
+8. Native parsers and OCR extract bidder evidence with page and region provenance.
+9. The system normalizes identifiers, names, dates, amounts, and certificate references.
+10. BGE-M3 creates page-bounded bidder-evidence embeddings stored in pgvector.
+11. For every tender criterion, pgvector retrieves multiple candidate bidder-evidence chunks.
+12. Thresholds remove unreliable candidates; absent reliable matches go to manual review.
+13. Qwen3-VL compares each grounded criterion with the retrieved original bidder evidence.
+14. The comparison service validates the structured response, exact quote, value, unit, page,
+    evidence reference, and confidence.
+15. When required, normalized identifiers are sent to labelled mock or sandbox portal adapters.
+16. Adapter responses are converted into `EvidenceResult` records.
+17. The deterministic rule engine evaluates document evidence, retrieval results, model comparisons, and portal evidence.
+18. The scoring service assigns full quota for a pass, half only for an explicitly tender-sourced
+    fallback range, and zero for a failure, missing evidence awaiting clarification, or unreliable
+    evidence requiring manual review.
+19. The recommendation service produces an evidence-linked recommendation.
+20. The dashboard presents evidence, matched clauses, comparisons, portal results, findings, score, risk, and recommendation.
+21. The officer reviews the evidence and records a final decision with a reason.
+22. The API stores the immutable decision and appends an audit event.
 
 ## 22. Lifecycle and failure semantics
 

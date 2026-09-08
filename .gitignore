@@ -16,4 +16,9 @@ coverage/
 uploads/
 storage/
 *.sqlite3
+.venv/
+.model-cache/
+artifacts/
+output/
+tmp/
 
