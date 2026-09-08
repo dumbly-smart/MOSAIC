@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .weighted import POLICY, number, validate_criteria
 
-TENDER_PROMPT_VERSION = "typed-tender-criteria-v2"
+TENDER_PROMPT_VERSION = "typed-tender-criteria-v3"
 
 
 def _numeric_tokens(text):
@@ -51,14 +51,23 @@ def ground_page_answer(answer, rows, *, page):
         raise ValueError("Invalid tender page answer")  # noqa: TRY004
     page_rows = [row for row in rows if row.get("page") == page]
     page_lines = {row.get("text") for row in page_rows}
+    lines_by_id = {row.get("line"): row.get("text") for row in page_rows}
     if not page_lines:
         raise ValueError("Tender page has no extracted text")
     declarations = {}
-    for value_key, quote_key, label in (
-        ("declared_criteria_count", "count_quote", "criterion-count declaration"),
-        ("declared_total_weight", "total_weight_quote", "weight-total declaration"),
+    for value_key, quote_key, line_key, label in (
+        ("declared_criteria_count", "count_quote", "count_line", "criterion-count declaration"),
+        (
+            "declared_total_weight",
+            "total_weight_quote",
+            "total_weight_line",
+            "weight-total declaration",
+        ),
     ):
         value, quote = answer.get(value_key), answer.get(quote_key)
+        line_id = answer.get(line_key)
+        if type(line_id) is int and line_id in lines_by_id:
+            quote = lines_by_id[line_id]
         if quote is None:
             declarations[value_key] = declarations[quote_key] = None
             continue
@@ -72,11 +81,15 @@ def ground_page_answer(answer, rows, *, page):
     for item in answer["criteria"]:
         if not isinstance(item, dict):
             raise ValueError("Every tender criterion must be an object")  # noqa: TRY004
-        required = ("id", "field", "value_type", "operator", "clause_quote", "weight_quote")
+        required = ("id", "field", "value_type", "operator")
         if any(not isinstance(item.get(key), str) or not item[key].strip() for key in required):
             raise ValueError("Tender criterion is missing required text")
-        clause = _exact_line(item["clause_quote"], page_lines, "clause")
-        weight_quote = _exact_line(item["weight_quote"], page_lines, "weight")
+        clause_line = item.get("clause_line")
+        weight_line = item.get("weight_line")
+        clause = lines_by_id.get(clause_line) if type(clause_line) is int else None
+        weight_quote = lines_by_id.get(weight_line) if type(weight_line) is int else None
+        clause = _exact_line(clause or item.get("clause_quote"), page_lines, "clause")
+        weight_quote = _exact_line(weight_quote or item.get("weight_quote"), page_lines, "weight")
         if item["field"].casefold() not in clause.casefold():
             raise ValueError("Tender field is not present in its clause quote")
         if not any(re.search(r"\b" + re.escape(item["id"]) + r"\b", line) for line in page_lines):
@@ -88,6 +101,20 @@ def ground_page_answer(answer, rows, *, page):
         criterion = {key: item[key] for key in ("id", "field", "value_type", "operator", "weight")}
         if value_type == "numeric":
             unit = item.get("unit")
+            threshold = item.get("threshold")
+            if operator in (">=", "<=", "==") and (
+                not isinstance(unit, str) or not number(threshold)
+            ):
+                wording = {
+                    ">=": r"\b(?:at least|minimum|not less than)\s+(-?\d[\d,.]*)\s+([A-Za-z%]+)\b",
+                    "<=": r"\b(?:at most|maximum|not more than)\s+(-?\d[\d,.]*)\s+([A-Za-z%]+)\b",
+                    "==": r"\b(?:exactly|equal to)\s+(-?\d[\d,.]*)\s+([A-Za-z%]+)\b",
+                }
+                match = re.search(wording[operator], clause, re.IGNORECASE)
+                if match:
+                    threshold = float(match.group(1).replace(",", ""))
+                    threshold = int(threshold) if threshold.is_integer() else threshold
+                    unit = match.group(2)
             if not isinstance(unit, str) or not re.search(
                 r"\b" + re.escape(unit) + r"\b", clause, re.IGNORECASE
             ):
@@ -114,25 +141,27 @@ def ground_page_answer(answer, rows, *, page):
                 raise ValueError("Tender range bounds are absent from its clause quote")
             criterion["bounds"] = bounds
         elif value_type == "numeric":
-            threshold = item.get("threshold")
             if not number(threshold) or float(threshold) not in tokens:
                 raise ValueError("Tender threshold is absent from its clause quote")
             criterion["threshold"] = threshold
-        elif value_type == "boolean" and operator == "==" and type(item.get("expected")) is bool:
-            expected = item["expected"]
-            supported = (
-                re.search(r"\b(must|shall)\s+not\b|\bnot\s+be\b|\bno\b", clause, re.IGNORECASE)
-                if expected is False
-                else re.search(
-                    r"\b(must|shall)\s+be\b|\b(required|mandatory)\b", clause, re.IGNORECASE
-                )
+        elif value_type == "boolean" and operator == "==":
+            negative = re.search(
+                r"\b(must|shall)\s+not\b|\bnot\s+be\b|\bno\b", clause, re.IGNORECASE
             )
-            if not supported:
+            positive = re.search(
+                r"\b(must|shall)\s+be\b|\b(required|mandatory)\b", clause, re.IGNORECASE
+            )
+            expected = item.get("expected")
+            if type(expected) is not bool:
+                expected = False if negative else True if positive else None
+            if (
+                expected is None
+                or (expected is False and not negative)
+                or (expected is True and not positive)
+            ):
                 raise ValueError("Tender boolean value is not supported by its clause wording")
             criterion["expected"] = expected
-        elif (
-            value_type == "document_presence" and operator == "==" and item.get("expected") is True
-        ):
+        elif value_type == "document_presence" and operator == "==":
             if not re.search(
                 r"\b(must|shall|required|mandatory)\b.*\b(submit(?:ted)?|provide(?:d)?|include(?:d)?|attach(?:ed)?|document|certificate)\b",
                 clause,
@@ -142,6 +171,9 @@ def ground_page_answer(answer, rows, *, page):
             criterion["expected"] = True
         elif value_type == "categorical" and operator in ("==", "one_of"):
             expected = item.get("expected")
+            if operator == "==" and not isinstance(expected, str):
+                match = re.search(r"\bmust\s+be\s+([^.;]+)", clause, re.IGNORECASE)
+                expected = match.group(1).strip() if match else None
             values = expected if isinstance(expected, list) else [expected]
             if not values or any(
                 not isinstance(value, str)
@@ -154,6 +186,17 @@ def ground_page_answer(answer, rows, *, page):
             from datetime import date
 
             expected = item.get("expected")
+            dates = re.findall(r"\b\d{4}-\d{2}-\d{2}\b", clause)
+            if not isinstance(expected, str) and len(dates) == 1:
+                expected = dates[0]
+            if re.search(
+                r"\b(on or after|not before|valid (?:until|through))\b", clause, re.IGNORECASE
+            ):
+                operator = criterion["operator"] = ">="
+            elif re.search(
+                r"\b(on or before|not after|no later than|expires? by)\b", clause, re.IGNORECASE
+            ):
+                operator = criterion["operator"] = "<="
             try:
                 date.fromisoformat(expected)
             except (TypeError, ValueError) as exc:
@@ -265,16 +308,24 @@ def qwen_extract_tender_page(rows, pdf_path, page):
         "are numeric, boolean, document_presence, categorical, and date. Numeric rules support >=, "
         "<=, ==, and range. Boolean and document_presence use ==. Categorical uses == or one_of. "
         "Dates use ISO YYYY-MM-DD with >=, <=, or ==. Return one JSON "
-        "object with criteria (array), declared_criteria_count (integer or null), count_quote "
-        "(exact line or null), declared_total_weight (integer or null), total_weight_quote (exact "
-        "line or null). Every criterion requires id, field, value_type, operator, weight, clause_quote "
-        "and weight_quote. Numeric rules require threshold/bounds and unit; other rules require expected "
-        "with the correct JSON type. Return exact single source lines and no prose.\n"
+        "object with criteria (array), declared_criteria_count (integer or null), count_line "
+        "(supplied line ID or null), declared_total_weight (integer or null), total_weight_line "
+        "(supplied line ID or null). Every criterion requires id, field, value_type, operator, weight, "
+        "clause_line and weight_line using supplied integer line IDs. Numeric rules require "
+        "threshold/bounds and unit; other rules require expected with the correct JSON type. Return no "
+        "copied quotes and no prose.\n"
         "Declaration rule: populate declaration values ONLY when the literal declaration line is "
-        "present in extracted_lines on THIS page and copy that exact line into its quote field. "
+        "present in extracted_lines on THIS page and cite its supplied line ID. "
         "Otherwise set both declaration values and both declaration quote fields to null. Page-level "
         "criterion subtotals are not document declarations.\n"
-        + json.dumps({"page": page, "extracted_lines": [row["text"] for row in page_rows]})
+        + json.dumps(
+            {
+                "page": page,
+                "extracted_lines": [
+                    {"line": row["line"], "text": row["text"]} for row in page_rows
+                ],
+            }
+        )
     )
     import pymupdf
 
@@ -327,13 +378,36 @@ def extract_criteria(records_report, pdf_path, *, checkpoint=None, resume=False,
         pages = saved["pages"]
         if [item.get("page") for item in pages] != list(range(1, len(pages) + 1)):
             raise ValueError("Tender criteria checkpoint pages are not a valid prefix")
+        rejected_page = saved.get("rejected_page")
+        rejected_answer = saved.get("rejected_model_answer")
+        if rejected_page != len(pages) + 1 or not isinstance(rejected_answer, dict):
+            rejected_answer = None
     else:
         pages = []
+        rejected_answer = None
         if checkpoint_path:
             atomic_save(checkpoint_path, {"configuration": configuration, "pages": pages})
     for page in range(len(pages) + 1, records_report["page_count"] + 1):
-        answer = qwen_extract_tender_page(records_report["records"], pdf_path, page)
-        grounded = ground_page_answer(answer, records_report["records"], page=page)
+        answer = (
+            rejected_answer
+            if rejected_answer is not None
+            else qwen_extract_tender_page(records_report["records"], pdf_path, page)
+        )
+        rejected_answer = None
+        try:
+            grounded = ground_page_answer(answer, records_report["records"], page=page)
+        except ValueError:
+            if checkpoint_path:
+                atomic_save(
+                    checkpoint_path,
+                    {
+                        "configuration": configuration,
+                        "pages": pages,
+                        "rejected_page": page,
+                        "rejected_model_answer": answer,
+                    },
+                )
+            raise
         pages.append({"page": page, **grounded})
         if checkpoint_path:
             atomic_save(checkpoint_path, {"configuration": configuration, "pages": pages})

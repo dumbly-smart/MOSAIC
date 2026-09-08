@@ -118,6 +118,7 @@ class DocumentPipelineTests(unittest.TestCase):
         self.assertFalse(payload["think"])
         self.assertEqual(payload["options"]["num_predict"], 512)
         self.assertIn("Rank 1", payload["messages"][0]["content"])
+        self.assertIn("found means relevant current evidence", payload["messages"][0]["content"])
         self.assertEqual(evidence["line"], 256)
         self.assertEqual(raw, self.response)
 

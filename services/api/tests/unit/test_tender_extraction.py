@@ -23,6 +23,8 @@ class TenderExtractionTests(unittest.TestCase):
             {"page": 1, "text": "Requirement: Current bid security must be at least 25000 INR."},
             {"page": 1, "text": "Weight: 100 points"},
         ]
+        for line, row in enumerate(self.rows, 1):
+            row["line"] = line
         self.answer = {
             "declared_criteria_count": 1,
             "count_quote": "Scored criteria count: 1",
@@ -49,6 +51,17 @@ class TenderExtractionTests(unittest.TestCase):
         grounded = ground_page_answer(self.answer, self.rows, page=1)
         self.assertEqual(grounded["criteria"][0]["threshold"], 25000)
         self.assertEqual(grounded["criteria"][0]["source_page"], 1)
+
+    def test_model_can_cite_supplied_line_ids_without_reproducing_quotes(self):
+        answer = json.loads(json.dumps(self.answer))
+        answer.update(count_line=1, total_weight_line=2)
+        answer.pop("count_quote")
+        answer.pop("total_weight_quote")
+        answer["criteria"][0].update(clause_line=4, weight_line=5)
+        answer["criteria"][0].pop("clause_quote")
+        answer["criteria"][0].pop("weight_quote")
+        grounded = ground_page_answer(answer, self.rows, page=1)
+        self.assertEqual(grounded["criteria"][0]["clause"], self.rows[3]["text"])
 
     def test_invented_clause_weight_value_unit_or_field_is_rejected(self):
         changes = (

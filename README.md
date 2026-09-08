@@ -28,7 +28,7 @@ Portal integrations remain behind adapter interfaces. The verification engine co
 
 ## Project status
 
-The `verification` branch contains a Python verification engine, a nine-scenario terminal demo, and a layered synthetic document benchmark. Docling/RapidOCR extraction is validated on the complete synthetic 500-page PDF. Ollama BGE-M3 embedded all 1,979 page-bounded chunks and achieved 5/5 ground-truth evidence recall at top-5; a persisted local test index and answer-key-isolated evaluator reproduce the result. A PostgreSQL+pgvector store and launcher path are implemented and contract-tested but have not been live-tested on this machine because Docker/PostgreSQL is unavailable. Portals, FastAPI, document upload, and the dashboard are not connected.
+The `verification` branch contains a Python verification engine, a nine-scenario terminal demo, and layered synthetic document benchmarks. Docling/RapidOCR extraction is validated on the complete synthetic 500-page PDF. Ollama BGE-M3 embedded all 1,979 page-bounded chunks and achieved 5/5 ground-truth evidence recall at top-5; a persisted local test index and answer-key-isolated evaluator reproduce the result. A live mixed-type run also extracted and checked boolean, document-presence, categorical, ISO-date, and numeric rules against a five-page image-only bidder PDF, producing 100/100 with exact page evidence. A PostgreSQL+pgvector store and launcher path are implemented and contract-tested but have not been live-tested on this machine because Docker/PostgreSQL is unavailable. Portals, FastAPI, document upload, and the dashboard are not connected.
 
 ## Document benchmark
 

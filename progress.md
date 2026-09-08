@@ -151,6 +151,7 @@ Do not mark an implementation item complete without running its relevant command
 | 2026-09-08 | External tender-to-bidder PDF workflow | Tender extraction, `extract-criteria`, forced-OCR bidder extraction, BGE-M3 retrieval, `verify-local`, isolated evaluators, and resumable launcher | Passed: five tender criteria grounded; 12/12 image-only bidder pages and 216 OCR lines; 5/5 evidence recall at rank 1; exact final outcome 35/100 |
 | 2026-09-08 | Verification branch pre-push checks | `python -m unittest discover -s services/api/tests -q`, Ruff lint/format checks, PowerShell parser, and `git diff --check` | Passed: 85 tests; lint, format, script syntax, and whitespace checks passed |
 | 2026-09-08 | Typed rules and pgvector integration | Typed grounding/scoring tests, pgvector SQL contract tests, synthetic PDF structure/render checks, full unit suite, Ruff | Passed: numeric, boolean, document-presence, categorical and date evaluation; pgvector schema/upsert/scoped-cosine contract; 96 tests; lint and format passed |
+| 2026-09-08 | Live mixed-type PDF workflow | Docling tender extraction, RapidOCR on all five image-only bidder pages, BGE-M3 retrieval, Qwen3-VL comparison, and deterministic weighted scoring | Passed: boolean, document-presence, categorical, ISO-date, and numeric criteria; exact grounded page evidence; 100/100; advisory `qualify` |
 
 ## Decisions
 
@@ -181,8 +182,10 @@ Do not mark an implementation item complete without running its relevant command
   cosine index, idempotent scoped upserts and corpus/model-filtered searches. The database
   contract is unit-tested. Live pgvector execution is not claimed because Docker/PostgreSQL is
   not installed on this machine. A mixed-type tender and five-page image-only bidder fixture
-  were generated and visually verified; Docling extracted all 17 tender lines, but live Qwen
-  execution is pending because this process cannot launch Ollama and its service was offline.
+  were generated and visually verified. Docling extracted all 17 tender lines, RapidOCR
+  processed all five bidder pages, and the live BGE-M3-to-Qwen3-VL workflow passed all five
+  typed criteria for 100/100 with exact page/line evidence. Report:
+  `artifacts/typed-e2e/verification-report-v2.json`.
 
 - Full local verification is complete: persisted BGE-M3 top-5 retrieval feeds ranked text
   into Ollama `qwen3-vl:4b-instruct`; candidate page images are added only when the original
