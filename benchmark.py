@@ -81,6 +81,8 @@ def main():
     sub.add_parser("doctor")
     generate = sub.add_parser("generate")
     generate.add_argument("--output", default="artifacts/corpus")
+    generate_typed = sub.add_parser("generate-typed")
+    generate_typed.add_argument("--output", default="output/pdf/mosaic-typed-e2e")
     extract = sub.add_parser("extract")
     extract.add_argument("pdf")
     extract.add_argument("--start", type=int, default=1)
@@ -140,6 +142,11 @@ def main():
         from services.api.app.verification.fabricate import build
 
         print(build(Path(args.output)))
+        return
+    if args.command == "generate-typed":
+        from services.api.app.verification.fabricate_typed import build_typed
+
+        print(build_typed(Path(args.output)))
         return
     if args.command == "extract":
         report = extract_document(

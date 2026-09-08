@@ -220,8 +220,8 @@ scoring begins:
 
 1. Parse every tender page using native extraction with OCR fallback and retain page provenance.
 2. Ask Qwen3-VL for structured candidate criteria using the page text and page image.
-3. Accept a candidate only when its clause, numeric bounds, unit, weight, and source page are
-   grounded in exact tender quotes.
+3. Accept a candidate only when its clause, typed requirement value, applicable unit, weight,
+   and source page are grounded in exact tender quotes.
 4. Require a declared criterion count and weights totalling 100; missing or contradictory
    declarations stop automatic scoring and require clarification.
 5. Derive the tender and rule-set versions from the source PDF hash, model identity, and prompt

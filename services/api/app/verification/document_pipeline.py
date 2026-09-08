@@ -128,27 +128,50 @@ class BgeM3:
 
 
 class PgStore:
-    """Exact cosine search for the small benchmark, filtered by corpus and model."""
+    """Persistent pgvector cosine search, isolated by corpus and embedding model."""
 
-    def __init__(self, dsn):
-        import psycopg
-        from pgvector.psycopg import register_vector
+    def __init__(self, dsn, *, connection_factory=None, vector_registrar=None):
+        if not isinstance(dsn, str) or not dsn.strip():
+            raise ValueError("A PostgreSQL DSN is required")
+        if connection_factory is None:
+            import psycopg
 
-        self.conn = psycopg.connect(dsn, connect_timeout=5)
+            connection_factory = psycopg.connect
+        if vector_registrar is None:
+            from pgvector.psycopg import register_vector
+
+            vector_registrar = register_vector
+
+        self.conn = connection_factory(dsn, connect_timeout=5)
         self.conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
         self.conn.commit()
-        register_vector(self.conn)
+        vector_registrar(self.conn)
         self.conn.execute("""CREATE TABLE IF NOT EXISTS mosaic_benchmark_chunks (
             corpus_id text NOT NULL, model text NOT NULL, chunk_id text NOT NULL,
             payload jsonb NOT NULL, embedding vector(1024) NOT NULL,
             PRIMARY KEY (corpus_id, model, chunk_id))""")
+        self.conn.execute("""CREATE INDEX IF NOT EXISTS mosaic_benchmark_chunks_embedding_hnsw
+            ON mosaic_benchmark_chunks USING hnsw (embedding vector_cosine_ops)""")
         self.conn.commit()
 
     def index(self, corpus_id, model, records, vectors):
+        import numpy as np
         from psycopg.types.json import Jsonb
 
-        if len(records) != len(vectors):
-            raise ValueError("Embedding count does not match chunks")
+        from .embedding_retrieval import validate_vectors
+
+        if not isinstance(corpus_id, str) or not corpus_id.strip():
+            raise ValueError("A corpus ID is required")
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("An embedding model is required")
+        if not isinstance(records, list) or not records:
+            raise ValueError("At least one chunk is required")
+        if len({record.get("id") for record in records}) != len(records) or any(
+            not isinstance(record.get("id"), str) or not record["id"] for record in records
+        ):
+            raise ValueError("Chunk IDs must be nonempty and unique")
+        vectors = np.asarray(vectors, dtype=np.float32)
+        validate_vectors(vectors, len(records), 1024)
         with self.conn.transaction(), self.conn.cursor() as cursor:
             cursor.executemany(
                 """INSERT INTO mosaic_benchmark_chunks VALUES (%s,%s,%s,%s,%s)
@@ -158,19 +181,34 @@ class PgStore:
             )
 
     def search(self, corpus_id, model, query, k=5):
+        import numpy as np
+
+        from .embedding_retrieval import validate_vectors
+
+        if not isinstance(corpus_id, str) or not corpus_id.strip():
+            raise ValueError("A corpus ID is required")
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("An embedding model is required")
+        if type(k) is not int or not 1 <= k <= 100:
+            raise ValueError("k must be between 1 and 100")
+        query = np.asarray(query, dtype=np.float32)
+        validate_vectors(query.reshape(1, -1), 1, 1024)
         rows = self.conn.execute(
             """SELECT payload, 1-(embedding <=> %s) AS similarity
             FROM mosaic_benchmark_chunks WHERE corpus_id=%s AND model=%s
             ORDER BY embedding <=> %s LIMIT %s""",
             (query, corpus_id, model, query, k),
         ).fetchall()
-        return [dict(payload, similarity=float(score)) for payload, score in rows]
+        return [
+            dict(payload, similarity=float(score), rank=rank)
+            for rank, (payload, score) in enumerate(rows, 1)
+        ]
 
     def close(self):
         self.conn.close()
 
 
-def ground_response(response, candidates):
+def ground_response(response, candidates, criterion=None):
     """Accept only a value appearing in an exact quote from a supplied chunk."""
     if response.get("found") is False:
         supplied = ("chunk_id", "quote", "value", "unit", "uncertain")
@@ -191,22 +229,61 @@ def ground_response(response, candidates):
     row = next((r for r in candidate["rows"] if quote in r["text"]), None)
     if row is None:
         raise ValueError("Quote must refer to one extracted source line")
-    from .weighted import number
+    criterion = criterion or {"value_type": "numeric"}
+    value_type = criterion.get("value_type", "numeric")
+    value = response.get("value")
+    if value_type == "numeric":
+        from .weighted import number
 
-    if not number(response.get("value")):
-        raise ValueError("Model value must be finite and numeric")
-    tokens = re.findall(r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?(?![\w.])", quote)
-    if response["value"] not in [float(token.replace(",", "")) for token in tokens]:
-        raise ValueError(
-            "Model value is absent from its quote; no implicit unit conversions allowed"
+        if not number(value):
+            raise ValueError("Model value must be finite and numeric")
+        tokens = re.findall(r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?(?![\w.])", quote)
+        if value not in [float(token.replace(",", "")) for token in tokens]:
+            raise ValueError(
+                "Model value is absent from its quote; no implicit unit conversions allowed"
+            )
+        unit = response.get("unit")
+        if not isinstance(unit, str) or not re.search(
+            r"\b" + re.escape(unit) + r"\b", quote, re.IGNORECASE
+        ):
+            raise ValueError("Model unit is absent from its quote")
+    elif value_type == "boolean":
+        if type(value) is not bool:
+            raise ValueError("Boolean evidence must use a JSON boolean")
+        negative = bool(
+            re.search(r"\b(no|not|false|inactive|absent|never)\b", quote, re.IGNORECASE)
         )
-    unit = response.get("unit")
-    if not isinstance(unit, str) or not re.search(
-        r"\b" + re.escape(unit) + r"\b", quote, re.IGNORECASE
-    ):
-        raise ValueError("Model unit is absent from its quote")
+        positive = bool(
+            re.search(r"\b(yes|true|active|present|valid|compliant)\b", quote, re.IGNORECASE)
+        )
+        if (value and not positive) or (not value and not negative):
+            raise ValueError("Boolean value is not supported by its exact quote")
+        unit = None
+    elif value_type == "document_presence":
+        if value is not True or not re.search(
+            r"\b(attached|submitted|provided|included|enclosed|present)\b", quote, re.IGNORECASE
+        ):
+            raise ValueError("Document presence is not supported by its exact quote")
+        unit = None
+    elif value_type in ("categorical", "date"):
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+            or not re.search(r"\b" + re.escape(value) + r"\b", quote, re.IGNORECASE)
+        ):
+            raise ValueError("Typed value is not present in its exact quote")
+        if value_type == "date":
+            from datetime import date
+
+            try:
+                date.fromisoformat(value)
+            except ValueError as exc:
+                raise ValueError("Date evidence must use ISO YYYY-MM-DD") from exc
+        unit = None
+    else:
+        raise ValueError("Unsupported criterion value type")
     return {
-        "value": response["value"],
+        "value": value,
         "unit": unit,
         "uncertain": response["uncertain"],
         "source_quote": quote,
@@ -244,7 +321,8 @@ def qwen_compare(criterion, candidates, pdf_path=None):
         "Do not decide the score. "
         "If evidence conflicts, set uncertain=true. Set uncertain=true for provisional or unconfirmed "
         "claims. Return JSON only: found (boolean), chunk_id (exact supplied ID), quote (exact "
-        "single source line), value (number), unit (literal unit), uncertain (boolean). "
+        "single source line), value (the JSON type required by criterion.value_type), unit "
+        "(literal unit for numeric criteria, otherwise null), uncertain (boolean). "
         'If and only if there is no relevant evidence return exactly {"found":false} with no other '
         "fields. Do not invent identifiers.\n"
         + json.dumps(
@@ -292,4 +370,4 @@ def qwen_compare(criterion, candidates, pdf_path=None):
     with urllib.request.urlopen(req, timeout=240) as response:
         answer = json.load(response)
     parsed = parse_model_answer(answer)
-    return ground_response(parsed, candidates), parsed
+    return ground_response(parsed, candidates, criterion), parsed

@@ -141,3 +141,46 @@ class WeightedTests(unittest.TestCase):
         self.assertEqual(result["rule_version"], "v3")
         self.assertEqual(result["source"]["reference"], "synthetic:C1")
         self.assertEqual(result["evidence"]["line"], 256)
+
+    def typed_rule(self, value_type, operator, expected):
+        rule = self.rule(value_type=value_type, operator=operator, expected=expected)
+        rule.pop("threshold")
+        rule.pop("unit")
+        return rule
+
+    def typed_evidence(self, value):
+        evidence = self.evidence()
+        evidence["value"] = value
+        evidence.pop("unit")
+        evidence["source_quote"] = f"Grounded declaration: {value}"
+        return evidence
+
+    def test_boolean_document_categorical_and_date_rules(self):
+        cases = (
+            (self.typed_rule("boolean", "==", False), False, True),
+            (self.typed_rule("boolean", "==", False), True, False),
+            (self.typed_rule("document_presence", "==", True), True, True),
+            (self.typed_rule("categorical", "==", "active"), "ACTIVE", True),
+            (self.typed_rule("categorical", "one_of", ["gold", "silver"]), "silver", True),
+            (self.typed_rule("date", ">=", "2026-01-01"), "2026-06-01", True),
+            (self.typed_rule("date", "<=", "2026-12-31"), "2027-01-01", False),
+        )
+        for rule, value, passed in cases:
+            with self.subTest(rule=rule, value=value):
+                result = assess(rule, self.typed_evidence(value))
+                self.assertEqual(result["status"], "passed" if passed else "failed")
+                self.assertEqual(result["earned_points"], 100 if passed else 0)
+
+    def test_invalid_typed_rules_and_evidence_fail_closed(self):
+        invalid_rules = (
+            self.typed_rule("boolean", "==", "false"),
+            self.typed_rule("document_presence", "==", False),
+            self.typed_rule("categorical", "one_of", []),
+            self.typed_rule("date", ">=", "01/01/2026"),
+            self.typed_rule("invented", "==", True),
+        )
+        for rule in invalid_rules:
+            with self.subTest(rule=rule), self.assertRaises(ValueError):
+                validate_criteria([rule])
+        result = assess(self.typed_rule("boolean", "==", False), self.typed_evidence("false"))
+        self.assertEqual((result["status"], result["earned_points"]), ("manual_review", 0))

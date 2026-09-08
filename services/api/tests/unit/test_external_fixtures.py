@@ -6,6 +6,7 @@ from pathlib import Path
 import pymupdf
 
 from services.api.app.verification.fabricate_external import build_external
+from services.api.app.verification.fabricate_typed import build_typed
 
 
 class ExternalFixtureTests(unittest.TestCase):
@@ -23,3 +24,12 @@ class ExternalFixtureTests(unittest.TestCase):
         self.assertEqual(expected["expected_score"], 35)
         self.assertEqual(len(expected["tender_criteria"]), 5)
         self.assertEqual(len(expected["criteria"]), 5)
+
+    def test_typed_fixture_has_one_tender_and_five_image_only_bidder_pages(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = build_typed(Path(temporary))
+            with pymupdf.open(paths["tender_pdf"]) as tender:
+                self.assertEqual(tender.page_count, 1)
+            with pymupdf.open(paths["bidder_pdf"]) as bidder:
+                self.assertEqual(bidder.page_count, 5)
+                self.assertTrue(all(not page.get_text().strip() for page in bidder))

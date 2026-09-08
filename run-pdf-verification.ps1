@@ -5,6 +5,8 @@ param(
     [ValidateRange(1, 100)][int]$BatchSize = 10,
     [ValidateRange(1, 100)][int]$TopK = 5,
     [switch]$ForceOcrBidder,
+    [switch]$UsePgVector,
+    [string]$DatabaseUrl,
     [switch]$Resume
 )
 
@@ -61,6 +63,23 @@ $extractBidder = @(
 if ($ForceOcrBidder) { $extractBidder += '--force-ocr' }
 if ($Resume) { $extractBidder += '--resume' }
 Invoke-MosaicStep $extractBidder
+
+if ($UsePgVector) {
+    if ($DatabaseUrl) { $env:MOSAIC_DATABASE_URL = $DatabaseUrl }
+    if (-not $env:MOSAIC_DATABASE_URL) {
+        throw 'UsePgVector requires -DatabaseUrl or the MOSAIC_DATABASE_URL environment variable.'
+    }
+    if ((Test-Path -LiteralPath $report) -and $Resume) {
+        Write-Host "Verification already complete. Report: $report"
+        exit 0
+    }
+    Invoke-MosaicStep @(
+        'verify', '--records', $bidderExtraction, '--criteria', $criteria,
+        '--pdf', $resolvedBidder, '--top-k', [string]$TopK, '--output', $report
+    )
+    Write-Host "Verification finished with PostgreSQL+pgvector. Report: $report"
+    exit 0
+}
 
 if (-not (Test-Path -LiteralPath $index)) {
     Invoke-MosaicStep @(

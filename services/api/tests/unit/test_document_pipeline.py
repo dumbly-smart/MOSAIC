@@ -69,6 +69,38 @@ class DocumentPipelineTests(unittest.TestCase):
     def test_no_found_evidence_is_not_invented(self):
         self.assertIsNone(ground_response({"found": False}, [self.candidate]))
 
+    def test_typed_values_are_grounded_in_exact_quotes(self):
+        cases = (
+            ({"value_type": "boolean"}, False, "Bidder is not blacklisted."),
+            ({"value_type": "document_presence"}, True, "ISO certificate is attached."),
+            ({"value_type": "categorical"}, "active", "Registration status: active."),
+            ({"value_type": "date"}, "2027-06-30", "Valid until 2027-06-30."),
+        )
+        for criterion, value, quote in cases:
+            candidate = chunks([dict(self.row, text=quote)])[0]
+            response = {
+                "found": True,
+                "chunk_id": candidate["id"],
+                "quote": quote,
+                "value": value,
+                "uncertain": False,
+            }
+            with self.subTest(criterion=criterion):
+                evidence = ground_response(response, [candidate], criterion)
+                self.assertEqual(evidence["value"], value)
+
+    def test_typed_value_not_supported_by_quote_is_rejected(self):
+        candidate = chunks([dict(self.row, text="Registration status: inactive.")])[0]
+        response = {
+            "found": True,
+            "chunk_id": candidate["id"],
+            "quote": candidate["text"],
+            "value": "active",
+            "uncertain": False,
+        }
+        with self.assertRaises(ValueError):
+            ground_response(response, [candidate], {"value_type": "categorical"})
+
     def test_found_false_with_claimed_evidence_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "found=false"):
             ground_response(

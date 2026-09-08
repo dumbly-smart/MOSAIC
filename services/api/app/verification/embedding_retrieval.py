@@ -126,14 +126,16 @@ def corpus_id(chunks):
 
 
 def criterion_query(criterion):
-    required = ("id", "clause", "field", "unit")
+    required = ("id", "clause", "field")
     if not isinstance(criterion, dict) or any(
         not isinstance(criterion.get(k), str) or not criterion[k].strip() for k in required
     ):
         raise ValueError("Criterion lacks text required for retrieval")
+    expectation = criterion.get("threshold", criterion.get("bounds", criterion.get("expected")))
+    unit = f" Expected unit: {criterion['unit']}." if criterion.get("unit") else ""
     return (
         f"Current bidder evidence for {criterion['field']}. "
-        f"Tender requirement: {criterion['clause']}. Expected unit: {criterion['unit']}."
+        f"Tender requirement: {criterion['clause']}. Expected value: {expectation}.{unit}"
     )
 
 

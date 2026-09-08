@@ -32,6 +32,7 @@ class TenderExtractionTests(unittest.TestCase):
                 {
                     "id": "C1",
                     "field": "Current bid security",
+                    "value_type": "numeric",
                     "operator": ">=",
                     "threshold": 25000,
                     "unit": "INR",
@@ -141,3 +142,76 @@ class TenderExtractionTests(unittest.TestCase):
         self.assertTrue(result["all_correct"])
         actual["criteria"][0]["source"]["page"] = 2
         self.assertFalse(evaluate_criteria_document(actual, expected)["all_correct"])
+
+    def test_boolean_presence_categorical_and_date_clauses_are_grounded(self):
+        rows = [
+            {"page": 1, "text": "Scored criteria count: 4"},
+            {"page": 1, "text": "Total scored weight: 100 points"},
+            {"page": 1, "text": "Criterion B1 - Blacklist status"},
+            {"page": 1, "text": "Requirement: Blacklist status must not be blacklisted."},
+            {"page": 1, "text": "Weight B1: 25 points"},
+            {"page": 1, "text": "Criterion D1 - ISO certificate"},
+            {"page": 1, "text": "Requirement: Bidder must submit ISO certificate document."},
+            {"page": 1, "text": "Weight D1: 25 points"},
+            {"page": 1, "text": "Criterion S1 - Registration status"},
+            {"page": 1, "text": "Requirement: Registration status must be active."},
+            {"page": 1, "text": "Weight S1: 25 points"},
+            {"page": 1, "text": "Criterion X1 - Certificate expiry"},
+            {"page": 1, "text": "Requirement: Certificate expiry must be valid until 2027-06-30."},
+            {"page": 1, "text": "Weight X1: 25 points"},
+        ]
+        answer = {
+            "declared_criteria_count": 4,
+            "count_quote": rows[0]["text"],
+            "declared_total_weight": 100,
+            "total_weight_quote": rows[1]["text"],
+            "criteria": [
+                {
+                    "id": "B1",
+                    "field": "Blacklist status",
+                    "value_type": "boolean",
+                    "operator": "==",
+                    "expected": False,
+                    "weight": 25,
+                    "clause_quote": rows[3]["text"],
+                    "weight_quote": rows[4]["text"],
+                },
+                {
+                    "id": "D1",
+                    "field": "ISO certificate",
+                    "value_type": "document_presence",
+                    "operator": "==",
+                    "expected": True,
+                    "weight": 25,
+                    "clause_quote": rows[6]["text"],
+                    "weight_quote": rows[7]["text"],
+                },
+                {
+                    "id": "S1",
+                    "field": "Registration status",
+                    "value_type": "categorical",
+                    "operator": "==",
+                    "expected": "active",
+                    "weight": 25,
+                    "clause_quote": rows[9]["text"],
+                    "weight_quote": rows[10]["text"],
+                },
+                {
+                    "id": "X1",
+                    "field": "Certificate expiry",
+                    "value_type": "date",
+                    "operator": ">=",
+                    "expected": "2027-06-30",
+                    "weight": 25,
+                    "clause_quote": rows[12]["text"],
+                    "weight_quote": rows[13]["text"],
+                },
+            ],
+        }
+        document = build_criteria_document(
+            [ground_page_answer(answer, rows, page=1)], document_id="b" * 64
+        )
+        self.assertEqual(
+            [criterion["value_type"] for criterion in document["criteria"]],
+            ["boolean", "document_presence", "categorical", "date"],
+        )

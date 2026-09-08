@@ -14,10 +14,10 @@ This file is the shared implementation ledger for humans and coding agents. Upda
 ## Current state
 
 MOSAIC now has a local, framework-independent Python verification core and a tested
-external-PDF workflow. It extracts grounded numeric criteria from a tender PDF, processes
-native or fully scanned bidder PDFs, retrieves evidence with local BGE-M3, compares it with
-Qwen3-VL, and scores it deterministically. FastAPI, persistent PostgreSQL/pgvector, object
-storage, portal adapters, and the web application have not yet been connected.
+external-PDF workflow. It extracts grounded typed criteria from a tender PDF, processes native
+or fully scanned bidder PDFs, retrieves evidence with BGE-M3 through a local index or pgvector,
+compares it with Qwen3-VL, and scores it deterministically. FastAPI, object storage, portal
+adapters, and the web application have not yet been connected.
 
 ## Documentation baseline
 
@@ -150,6 +150,7 @@ Do not mark an implementation item complete without running its relevant command
 | 2026-09-08 | Full regression suite | `python -m unittest discover -s services/api/tests -q` plus changed-file Ruff checks | Passed: 76 tests; lint passed; completed-report resume verified |
 | 2026-09-08 | External tender-to-bidder PDF workflow | Tender extraction, `extract-criteria`, forced-OCR bidder extraction, BGE-M3 retrieval, `verify-local`, isolated evaluators, and resumable launcher | Passed: five tender criteria grounded; 12/12 image-only bidder pages and 216 OCR lines; 5/5 evidence recall at rank 1; exact final outcome 35/100 |
 | 2026-09-08 | Verification branch pre-push checks | `python -m unittest discover -s services/api/tests -q`, Ruff lint/format checks, PowerShell parser, and `git diff --check` | Passed: 85 tests; lint, format, script syntax, and whitespace checks passed |
+| 2026-09-08 | Typed rules and pgvector integration | Typed grounding/scoring tests, pgvector SQL contract tests, synthetic PDF structure/render checks, full unit suite, Ruff | Passed: numeric, boolean, document-presence, categorical and date evaluation; pgvector schema/upsert/scoped-cosine contract; 96 tests; lint and format passed |
 
 ## Decisions
 
@@ -162,7 +163,7 @@ Do not mark an implementation item complete without running its relevant command
 
 ## Active work and blockers
 
-- External-PDF verification is complete for the prototype's numeric rule scope. A separate
+- The original external-PDF proof is complete for the prototype's numeric rule scope. A separate
   three-page tender PDF produced five quote-grounded criteria with the expected field,
   operator, threshold, unit, weight, and page. A separate 12-page image-only bidder PDF
   produced 216 OCR lines with no failed or review pages. BGE-M3 retrieved all five expected
@@ -170,10 +171,18 @@ Do not mark an implementation item complete without running its relevant command
   status, value, quote, page, and point allocation: C1 failed 0/25, C2 failed 0/25,
   C3 passed 20/20, C4 manual review 0/15, and C5 passed 15/15, for 35/100.
   `run-pdf-verification.ps1` accepts arbitrary local tender and bidder PDF paths and its
-  completed-stage resume path was integration-tested. Current limits: tender criteria must
-  explicitly declare numeric bounds, units, weights, criterion count, and total weight 100;
-  non-numeric document-presence, date, certificate, and portal-backed rules still need their
-  own typed extractors and evaluators.
+  completed-stage resume path was integration-tested. Typed support was added afterward as
+  described below; the 35/100 live result remains the numeric regression baseline.
+
+- Typed rule support now covers numeric, boolean, required-document presence, categorical and
+  ISO-date criteria. Exact source quotes, typed values and provenance are required before
+  deterministic scoring. PostgreSQL+pgvector persistence is available through `PgStore` and
+  `run-pdf-verification.ps1 -UsePgVector`; it creates a 1024-dimensional vector table, HNSW
+  cosine index, idempotent scoped upserts and corpus/model-filtered searches. The database
+  contract is unit-tested. Live pgvector execution is not claimed because Docker/PostgreSQL is
+  not installed on this machine. A mixed-type tender and five-page image-only bidder fixture
+  were generated and visually verified; Docling extracted all 17 tender lines, but live Qwen
+  execution is pending because this process cannot launch Ollama and its service was offline.
 
 - Full local verification is complete: persisted BGE-M3 top-5 retrieval feeds ranked text
   into Ollama `qwen3-vl:4b-instruct`; candidate page images are added only when the original
