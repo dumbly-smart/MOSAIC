@@ -52,6 +52,43 @@ class TenderExtractionTests(unittest.TestCase):
         self.assertEqual(grounded["criteria"][0]["threshold"], 25000)
         self.assertEqual(grounded["criteria"][0]["source_page"], 1)
 
+    def test_numeric_clause_accepts_currency_before_threshold(self):
+        self.rows[3]["text"] = "Requirement: Current bid security must be at least INR 25000."
+        answer = json.loads(json.dumps(self.answer))
+        answer["criteria"][0]["clause_quote"] = self.rows[3]["text"]
+        answer["criteria"][0].pop("threshold")
+        answer["criteria"][0].pop("unit")
+        grounded = ground_page_answer(answer, self.rows, page=1)
+        self.assertEqual(grounded["criteria"][0]["threshold"], 25000)
+        self.assertEqual(grounded["criteria"][0]["unit"], "INR")
+
+    def test_numeric_operator_accidentally_returned_as_value_type_is_normalized(self):
+        answer = json.loads(json.dumps(self.answer))
+        answer["criteria"][0]["value_type"] = ">="
+        grounded = ground_page_answer(answer, self.rows, page=1)
+        self.assertEqual(grounded["criteria"][0]["value_type"], "numeric")
+
+    def test_unscored_document_mapping_rows_are_not_scored_criteria(self):
+        rows = [
+            {"page": 1, "line": 1, "text": "4. Documents Required from Bidders"},
+            {"page": 1, "line": 2, "text": "| Bank Guarantee | C1 | PDF |"},
+        ]
+        answer = {
+            "criteria": [
+                {
+                    "id": "C1",
+                    "field": "Bank Guarantee",
+                    "value_type": "document_presence",
+                    "operator": "==",
+                    "weight": None,
+                    "clause_line": 2,
+                    "weight_line": None,
+                }
+            ]
+        }
+        grounded = ground_page_answer(answer, rows, page=1)
+        self.assertEqual(grounded["criteria"], [])
+
     def test_model_can_cite_supplied_line_ids_without_reproducing_quotes(self):
         answer = json.loads(json.dumps(self.answer))
         answer.update(count_line=1, total_weight_line=2)
@@ -62,6 +99,51 @@ class TenderExtractionTests(unittest.TestCase):
         answer["criteria"][0].pop("weight_quote")
         grounded = ground_page_answer(answer, self.rows, page=1)
         self.assertEqual(grounded["criteria"][0]["clause"], self.rows[3]["text"])
+
+    def test_criterion_count_can_be_grounded_by_clause_id_range(self):
+        self.rows[0]["text"] = "Clause identifiers (C1-C5) correspond to the published rule set."
+        answer = json.loads(json.dumps(self.answer))
+        answer.update(
+            declared_criteria_count=5,
+            count_line=1,
+        )
+        answer.pop("count_quote")
+        grounded = ground_page_answer(answer, self.rows, page=1)
+        self.assertEqual(grounded["declared_criteria_count"], 5)
+
+    def test_criterion_count_uses_grounded_range_over_model_value(self):
+        self.rows[0]["text"] = "Clause identifiers (C1-C4) correspond to the published rule set."
+        answer = json.loads(json.dumps(self.answer))
+        answer.update(
+            declared_criteria_count=5,
+            count_line=1,
+        )
+        answer.pop("count_quote")
+        grounded = ground_page_answer(answer, self.rows, page=1)
+        self.assertEqual(grounded["declared_criteria_count"], 4)
+
+    def test_bad_page_subtotals_recover_from_exact_document_declarations(self):
+        rows = [
+            {"page": 1, "line": 1, "text": "3. Eligibility Criteria"},
+            {
+                "page": 1,
+                "line": 2,
+                "text": "Clause identifiers (C1-C5) correspond to the published rule set.",
+            },
+            {"page": 1, "line": 3, "text": "Weights sum to 100 points."},
+        ]
+        answer = {
+            "criteria": [],
+            "declared_criteria_count": 2,
+            "count_line": 1,
+            "declared_total_weight": 50,
+            "total_weight_line": 1,
+        }
+        grounded = ground_page_answer(answer, rows, page=1)
+        self.assertEqual(grounded["declared_criteria_count"], 5)
+        self.assertEqual(grounded["count_quote"], rows[1]["text"])
+        self.assertEqual(grounded["declared_total_weight"], 100)
+        self.assertEqual(grounded["total_weight_quote"], rows[2]["text"])
 
     def test_invented_clause_weight_value_unit_or_field_is_rejected(self):
         changes = (
@@ -82,7 +164,7 @@ class TenderExtractionTests(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises(ValueError):
                 parse_tender_answer({"message": {"content": raw}})
 
-    def test_unquoted_page_subtotals_are_discarded_not_accepted(self):
+    def test_exact_document_declarations_are_recovered_when_model_omits_them(self):
         answer = json.loads(json.dumps(self.answer))
         answer.update(
             declared_criteria_count=1,
@@ -91,8 +173,8 @@ class TenderExtractionTests(unittest.TestCase):
             total_weight_quote=None,
         )
         grounded = ground_page_answer(answer, self.rows, page=1)
-        self.assertIsNone(grounded["declared_criteria_count"])
-        self.assertIsNone(grounded["declared_total_weight"])
+        self.assertEqual(grounded["declared_criteria_count"], 1)
+        self.assertEqual(grounded["declared_total_weight"], 100)
 
     def test_criteria_document_derives_version_and_checks_declared_totals(self):
         pages = [ground_page_answer(self.answer, self.rows, page=1)]

@@ -15,8 +15,70 @@ TENDER_PROMPT_VERSION = "typed-tender-criteria-v3"
 def _numeric_tokens(text):
     return [
         float(token.replace(",", ""))
-        for token in re.findall(r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?(?![\w.])", text)
+        for token in re.findall(r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?(?!\w|\.\d)", text)
     ]
+
+
+def _declares_criterion_count(value, quote):
+    """Accept an explicit count or a grounded identifier range such as C1-C5."""
+    if float(value) in _numeric_tokens(quote):
+        return True
+    match = re.search(
+        r"\b(?P<prefix>[A-Za-z]+)\s*1\s*"
+        r"(?:-|\u2013|\u2014|\u2212|\ufffd|\bto\b)\s*"
+        r"(?P=prefix)?\s*(?P<end>\d+)\b",
+        quote,
+        re.IGNORECASE,
+    )
+    return match is not None and int(match.group("end")) == value
+
+
+def _page_criterion_count(rows):
+    candidates = []
+    for row in rows:
+        quote = row.get("text")
+        if not isinstance(quote, str):
+            continue
+        direct = re.search(
+            r"\b(?:scored\s+)?criteria\s+count\s*[:=]\s*(\d+)\b",
+            quote,
+            re.IGNORECASE,
+        )
+        if direct:
+            candidates.append((int(direct.group(1)), quote))
+            continue
+        if not re.search(r"\b(?:clause|criterion)\s+identifiers?\b", quote, re.IGNORECASE):
+            continue
+        match = re.search(
+            r"\b(?P<prefix>[A-Za-z]+)\s*1\s*"
+            r"(?:-|\u2013|\u2014|\u2212|\ufffd|\bto\b)\s*"
+            r"(?P=prefix)?\s*(?P<end>\d+)\b",
+            quote,
+            re.IGNORECASE,
+        )
+        if match:
+            candidates.append((int(match.group("end")), quote))
+    values = {value for value, _ in candidates}
+    return candidates[0] if len(values) == 1 else None
+
+
+def _page_total_weight(rows):
+    candidates = []
+    patterns = (
+        r"\bweights?\s+sum\s+to\s+(\d+)\b",
+        r"\btotal(?:\s+scored)?\s+weight\s*[:=]\s*(\d+)\b",
+    )
+    for row in rows:
+        quote = row.get("text")
+        if not isinstance(quote, str):
+            continue
+        for pattern in patterns:
+            match = re.search(pattern, quote, re.IGNORECASE)
+            if match:
+                candidates.append((int(match.group(1)), quote))
+                break
+    values = {value for value, _ in candidates}
+    return candidates[0] if len(values) == 1 else None
 
 
 def parse_tender_answer(answer):
@@ -74,13 +136,27 @@ def ground_page_answer(answer, rows, *, page):
         if type(value) is not int or value < 1:
             raise ValueError(f"Tender {label} must be a positive integer")
         quote = _exact_line(quote, page_lines, label)
-        if float(value) not in _numeric_tokens(quote):
-            raise ValueError(f"Tender {label} value is absent from its quote")
-        declarations[value_key], declarations[quote_key] = value, quote
+        value_is_grounded = float(value) in _numeric_tokens(quote)
+        if value_key == "declared_criteria_count":
+            value_is_grounded = _declares_criterion_count(value, quote)
+        if value_is_grounded:
+            declarations[value_key], declarations[quote_key] = value, quote
+        else:
+            declarations[value_key] = declarations[quote_key] = None
+    explicit_count = _page_criterion_count(page_rows)
+    if explicit_count:
+        declarations["declared_criteria_count"], declarations["count_quote"] = explicit_count
+    explicit_total = _page_total_weight(page_rows)
+    if explicit_total:
+        declarations["declared_total_weight"], declarations["total_weight_quote"] = explicit_total
     grounded = []
     for item in answer["criteria"]:
         if not isinstance(item, dict):
             raise ValueError("Every tender criterion must be an object")  # noqa: TRY004
+        if item.get("weight") is None and item.get("weight_line") is None and item.get(
+            "weight_quote"
+        ) is None:
+            continue
         required = ("id", "field", "value_type", "operator")
         if any(not isinstance(item.get(key), str) or not item[key].strip() for key in required):
             raise ValueError("Tender criterion is missing required text")
@@ -98,7 +174,10 @@ def ground_page_answer(answer, rows, *, page):
         if not number(weight) or float(weight) not in _numeric_tokens(weight_quote):
             raise ValueError("Tender weight is absent from its weight quote")
         value_type, operator = item["value_type"], item["operator"]
+        if value_type in (">=", "<=", "==", "range") and value_type == operator:
+            value_type = "numeric"
         criterion = {key: item[key] for key in ("id", "field", "value_type", "operator", "weight")}
+        criterion["value_type"] = value_type
         if value_type == "numeric":
             unit = item.get("unit")
             threshold = item.get("threshold")
@@ -115,6 +194,17 @@ def ground_page_answer(answer, rows, *, page):
                     threshold = float(match.group(1).replace(",", ""))
                     threshold = int(threshold) if threshold.is_integer() else threshold
                     unit = match.group(2)
+                else:
+                    currency_first = {
+                        ">=": r"\b(?:at least|minimum|not less than)\s+([A-Za-z%]+)\s+(-?\d[\d,.]*)\b",
+                        "<=": r"\b(?:at most|maximum|not more than)\s+([A-Za-z%]+)\s+(-?\d[\d,.]*)\b",
+                        "==": r"\b(?:exactly|equal to)\s+([A-Za-z%]+)\s+(-?\d[\d,.]*)\b",
+                    }
+                    match = re.search(currency_first[operator], clause, re.IGNORECASE)
+                    if match:
+                        unit = match.group(1)
+                        threshold = float(match.group(2).replace(",", ""))
+                        threshold = int(threshold) if threshold.is_integer() else threshold
             if not isinstance(unit, str) or not re.search(
                 r"\b" + re.escape(unit) + r"\b", clause, re.IGNORECASE
             ):
