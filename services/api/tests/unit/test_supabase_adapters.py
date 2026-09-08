@@ -82,7 +82,8 @@ class SupabaseAdapterTests(unittest.TestCase):
         method, url, options = client.calls[-1]
         self.assertEqual(method, "POST")
         self.assertIn("a%20file.pdf", url)
-        self.assertEqual(options["headers"]["Authorization"], "Bearer server-secret")
+        self.assertEqual(options["headers"]["apikey"], "server-secret")
+        self.assertNotIn("Authorization", options["headers"])
         storage.remove(["user/case/a file.pdf"])
         self.assertEqual(client.calls[-1][2]["json"], {"prefixes": ["user/case/a file.pdf"]})
         self.assertEqual(storage.download("user/case/a file.pdf"), b"downloaded-file")

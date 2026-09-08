@@ -22,7 +22,6 @@ class SupabaseStorage:
             f"{self.base_url}/storage/v1/object/{quote(self.bucket)}/{encoded_path}",
             headers={
                 "apikey": self.secret_key,
-                "Authorization": f"Bearer {self.secret_key}",
                 "Content-Type": content_type,
                 "x-upsert": "false",
             },
@@ -37,7 +36,6 @@ class SupabaseStorage:
             f"{self.base_url}/storage/v1/object/{quote(self.bucket)}",
             headers={
                 "apikey": self.secret_key,
-                "Authorization": f"Bearer {self.secret_key}",
             },
             json={"prefixes": object_paths},
         )
@@ -50,7 +48,6 @@ class SupabaseStorage:
             f"{self.base_url}/storage/v1/object/authenticated/{quote(self.bucket)}/{encoded_path}",
             headers={
                 "apikey": self.secret_key,
-                "Authorization": f"Bearer {self.secret_key}",
             },
         )
         if response.status_code != 200:
