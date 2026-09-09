@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: mosaic_benchmark
+      POSTGRES_USER: mosaic
+      POSTGRES_PASSWORD: ${MOSAIC_DB_PASSWORD:?Set a local demo database password}
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - mosaic_benchmark_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mosaic -d mosaic_benchmark"]
+      interval: 5s
+      retries: 10
+volumes:
+  mosaic_benchmark_pg:

@@ -1,0 +1,13 @@
+[project]
+name = "mosaic-verification"
+version = "0.1.0"
+description = "Officer-led bidder compliance verification core for MOSAIC"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "strict"

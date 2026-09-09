@@ -1,0 +1,1 @@
+"""MOSAIC application package."""
