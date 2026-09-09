@@ -1,4 +1,5 @@
 .superpowers/
+.worktrees/
 .env
 .env.*
 !.env.example
@@ -22,4 +23,3 @@ storage/
 artifacts/
 output/
 tmp/
-
