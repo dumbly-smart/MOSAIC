@@ -3,6 +3,7 @@
 .env
 .env.*
 !.env.example
+!web/.env.example
 __pycache__/
 *.py[cod]
 .pytest_cache/

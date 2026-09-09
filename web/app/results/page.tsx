@@ -1,6 +1,6 @@
 'use client';
 import React, { useState } from 'react';
-import { ShieldAlert, CheckCircle, AlertTriangle, Fingerprint, Banknote, FileCheck } from 'lucide-react';
+import { ShieldAlert, CheckCircle, Fingerprint, Banknote, FileCheck } from 'lucide-react';
 
 export default function ResultsPage() {
   const [decision, setDecision] = useState('qualify');
